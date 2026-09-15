@@ -93,6 +93,13 @@ const storedResumes = readStorage<Resume[]>(storageKeys.resumes, []);
 const initialResumes = storedResumes.length > 0 ? storedResumes : [buildResume('atelier', '产品经理求职简历')];
 const initialActiveResumeId = readStorage<string | null>(storageKeys.activeResumeId, initialResumes[0]?.id ?? null);
 
+// 首次进入时立即持久化默认简历：保证它的 id 在刷新、备份导出/恢复后保持稳定，
+// 岗位申请的 resumeId 关联不会因默认简历被重新生成而失效。
+if (storedResumes.length === 0) {
+  writeStorage(storageKeys.resumes, initialResumes);
+  writeStorage(storageKeys.activeResumeId, initialActiveResumeId);
+}
+
 function persist(state: Pick<ResumeState, 'resumes' | 'activeResumeId'>): void {
   writeStorage(storageKeys.resumes, state.resumes);
   writeStorage(storageKeys.activeResumeId, state.activeResumeId);
