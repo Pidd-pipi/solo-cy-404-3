@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host 0.0.0.0",
-    "test:e2e": "LD_LIBRARY_PATH=$HOME/.local/pw-libs/root/usr/lib/aarch64-linux-gnu:$HOME/.local/pw-libs/root/lib/aarch64-linux-gnu playwright test"
+    "test:e2e": "node scripts/test-e2e.mjs"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.4",

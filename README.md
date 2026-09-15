@@ -44,6 +44,8 @@ npx playwright install chromium   # 首次运行前安装浏览器
 npm run test:e2e
 ```
 
+`test:e2e` 入口（`scripts/test-e2e.mjs`）会自动检测 Chromium 所需的系统库：完整则直接运行；缺失时自动接入用户态补库（默认 `~/.local/pw-libs/root`，可用 `PW_LIBS_ROOT` 覆盖）；仍缺失会列出具体缺失项与恢复方式并以退出码 1 结束。无 root 权限的环境可执行 `bash scripts/provision-test-libs.sh` 完成用户态补库，无需修改测试命令。
+
 ## 技术栈
 
 | 分类 | 技术 |
