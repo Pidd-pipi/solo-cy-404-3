@@ -48,22 +48,56 @@ export function deadlineTone(deadline: string, stage: ApplicationStage): Deadlin
   return days <= 3 ? 'soon' : 'none';
 }
 
-function normalizeTimeline(raw: unknown, fallbackStage: ApplicationStage, fallbackAt: string): StageTransition[] {
-  if (!Array.isArray(raw)) {
-    return [{ from: null, to: fallbackStage, at: fallbackAt }];
-  }
-  const entries = raw
-    .filter((item): item is Partial<StageTransition> => Boolean(item) && typeof item === 'object')
-    .filter((item) => isApplicationStage(item.to))
-    .map((item) => ({
-      from: isApplicationStage(item.from) ? item.from : null,
-      to: item.to as ApplicationStage,
-      at: typeof item.at === 'string' && item.at ? item.at : fallbackAt,
-    }));
-  return entries.length > 0 ? entries : [{ from: null, to: fallbackStage, at: fallbackAt }];
+function stepToward(current: ApplicationStage, target: ApplicationStage): ApplicationStage {
+  const from = stageIndex(current);
+  const to = stageIndex(target);
+  return APPLICATION_STAGES[to > from ? from + 1 : from - 1];
 }
 
-/** 把任意来源（旧备份、手工编辑的存储）的申请记录补齐为合法结构 */
+/** 从时间线末端沿相邻阶段行进到 target，补齐中间每一步 */
+function appendAdjacentPath(timeline: StageTransition[], target: ApplicationStage, at: string): void {
+  let current = timeline[timeline.length - 1].to;
+  while (current !== target) {
+    const next = stepToward(current, target);
+    timeline.push({ from: current, to: next, at });
+    current = next;
+  }
+}
+
+/**
+ * 把任意来源的时间线收敛为合法路径：
+ * - 第一步是创建记录（from 为 null），锚点取首条记录的 from（非法时取 to）；
+ * - 后续每一步只能相邻推进或回退，跳级/缺步时沿相邻阶段补齐中间步；
+ * - 记录中的 from 与当前位置冲突时，以实际当前位置为准。
+ * 合法时间线（本应用产生的）经过此函数保持不变。
+ */
+function normalizeTimeline(raw: unknown, fallbackAt: string): StageTransition[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const repaired: StageTransition[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const entry = item as Partial<StageTransition>;
+    if (!isApplicationStage(entry.to)) {
+      continue;
+    }
+    const at = typeof entry.at === 'string' && entry.at ? entry.at : fallbackAt;
+    if (repaired.length === 0) {
+      const anchor = isApplicationStage(entry.from) ? entry.from : entry.to;
+      repaired.push({ from: null, to: anchor, at });
+    }
+    appendAdjacentPath(repaired, entry.to, at);
+  }
+  return repaired;
+}
+
+/**
+ * 把任意来源（旧备份、手工编辑的存储）的申请记录补齐为合法结构。
+ * 恢复后保证：stage 与时间线最后一步一致；时间线每一步都是相邻推进或回退。
+ */
 export function normalizeApplication(raw: unknown): JobApplication | null {
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -71,7 +105,17 @@ export function normalizeApplication(raw: unknown): JobApplication | null {
   const record = raw as Record<string, unknown>;
   const now = new Date().toISOString();
   const createdAt = typeof record.createdAt === 'string' && record.createdAt ? record.createdAt : now;
-  const stage = isApplicationStage(record.stage) ? record.stage : '待投递';
+  const updatedAt = typeof record.updatedAt === 'string' && record.updatedAt ? record.updatedAt : createdAt;
+  const recordedStage = isApplicationStage(record.stage) ? record.stage : null;
+
+  const timeline = normalizeTimeline(record.timeline, createdAt);
+  if (timeline.length === 0) {
+    const stage = recordedStage ?? '待投递';
+    timeline.push({ from: null, to: stage, at: createdAt });
+  } else if (recordedStage && recordedStage !== timeline[timeline.length - 1].to) {
+    // 阶段与时间线末步冲突：沿相邻路径补齐到记录的阶段，收敛为可解释的合法历史
+    appendAdjacentPath(timeline, recordedStage, updatedAt);
+  }
 
   return {
     id: typeof record.id === 'string' && record.id ? record.id : createId('app'),
@@ -82,10 +126,10 @@ export function normalizeApplication(raw: unknown): JobApplication | null {
     contact: typeof record.contact === 'string' ? record.contact : '',
     resumeId: typeof record.resumeId === 'string' ? record.resumeId : null,
     resumeTitle: typeof record.resumeTitle === 'string' ? record.resumeTitle : '',
-    stage,
-    timeline: normalizeTimeline(record.timeline, stage, createdAt),
+    stage: timeline[timeline.length - 1].to,
+    timeline,
     createdAt,
-    updatedAt: typeof record.updatedAt === 'string' && record.updatedAt ? record.updatedAt : createdAt,
+    updatedAt,
   };
 }
 

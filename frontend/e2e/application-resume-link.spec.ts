@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
-import { createApplicationViaUi, DEFAULT_RESUME_TITLE, readStorage, STORAGE_KEYS } from './helpers';
+import {
+  createApplicationViaUi,
+  DEFAULT_RESUME_TITLE,
+  expectLegalApplications,
+  readStorage,
+  STORAGE_KEYS,
+} from './helpers';
 
 test.describe('求职进展与简历关联（真实持久化）', () => {
   test('首次进入：默认简历立即持久化，刷新后身份不变', async ({ page }) => {
@@ -120,6 +126,7 @@ test.describe('求职进展与简历关联（真实持久化）', () => {
       await navigated;
       expect(await readStorage(page, STORAGE_KEYS.applications), '恢复后申请必须完整').toEqual(appsBefore);
       expect(await readStorage(page, STORAGE_KEYS.resumes), '恢复后简历必须完整').toEqual(resumesBefore);
+      await expectLegalApplications(page);
       await expect(page.locator('article').getByText('已投递', { exact: true })).toBeVisible();
       await expect(page.getByText(/已关联简历/)).toBeVisible();
       await expect(page.getByText(/已删除，申请已保留/), '备份恢复后不得误报失联').toHaveCount(0);
@@ -269,5 +276,164 @@ test.describe('求职进展与简历关联（真实持久化）', () => {
     await page.goto('/applications');
     await expect(page.locator('article'), '工作台只展示一条申请').toHaveCount(1);
     await expect(page.getByText(new RegExp(`已关联简历：${original.title}`))).toBeVisible();
+  });
+
+  test('非法阶段历史的备份：恢复后收敛为合法路径', async ({ page }, testInfo) => {
+    const T1 = '2026-02-01T08:00:00.000Z';
+    const T2 = '2026-02-02T08:00:00.000Z';
+    const T3 = '2026-02-03T08:00:00.000Z';
+    const T4 = '2026-02-04T08:00:00.000Z';
+
+    await page.goto('/applications');
+    const resumes = await readStorage(page, STORAGE_KEYS.resumes);
+    const backup = {
+      exportedAt: '2026-02-05T00:00:00.000Z',
+      resumes,
+      activeResumeId: resumes[0].id,
+      profile: {
+        fullName: '旧备份用户', headline: '', phone: '', email: '',
+        location: '', website: '', avatarUrl: '', targetRole: '', summary: '',
+      },
+      selectedTemplateId: 'atelier',
+      theme: 'light',
+      applications: [
+        {
+          // 跳级：待投递直接到面试
+          id: 'skip_1', company: '跳级公司', position: '岗位A', stage: '面试', createdAt: T1, updatedAt: T2,
+          timeline: [
+            { from: null, to: '待投递', at: T1 },
+            { from: '待投递', to: '面试', at: T2 },
+          ],
+        },
+        {
+          // 缺步：第三步的 from 与实际位置（已投递）不符
+          id: 'gap_1', company: '缺步公司', position: '岗位B', stage: '结束', createdAt: T1, updatedAt: T3,
+          timeline: [
+            { from: null, to: '待投递', at: T1 },
+            { from: '待投递', to: '已投递', at: T2 },
+            { from: 'Offer', to: '结束', at: T3 },
+          ],
+        },
+        {
+          // 阶段与末步冲突：时间线止于笔试，阶段却是 Offer
+          id: 'conflict_1', company: '冲突公司', position: '岗位C', stage: 'Offer', createdAt: T1, updatedAt: T4,
+          timeline: [
+            { from: null, to: '待投递', at: T1 },
+            { from: '待投递', to: '已投递', at: T2 },
+            { from: '已投递', to: '笔试', at: T3 },
+          ],
+        },
+        {
+          // 非法阶段：stage 不是合法枚举值
+          id: 'badstage_1', company: '坏阶段公司', position: '岗位D', stage: '不存在', createdAt: T1, updatedAt: T2,
+          timeline: [
+            { from: null, to: '待投递', at: T1 },
+            { from: '待投递', to: '已投递', at: T2 },
+          ],
+        },
+      ],
+    };
+    const backupPath = testInfo.outputPath('corrupt-backup.json');
+    await writeFile(backupPath, JSON.stringify(backup, null, 2));
+
+    const navigated = page.waitForEvent('framenavigated');
+    await page.locator('input[type=file]').setInputFiles(backupPath);
+    await navigated;
+
+    await test.step('跳级：补齐中间每一步', async () => {
+      const apps = await readStorage(page, STORAGE_KEYS.applications);
+      const app = apps.find((a: { id: string }) => a.id === 'skip_1');
+      expect(app.timeline.map((t: { to: string }) => t.to)).toEqual(['待投递', '已投递', '笔试', '面试']);
+      expect(app.stage).toBe('面试');
+    });
+
+    await test.step('缺步：以实际位置为准接续合法路径', async () => {
+      const apps = await readStorage(page, STORAGE_KEYS.applications);
+      const app = apps.find((a: { id: string }) => a.id === 'gap_1');
+      expect(app.timeline.map((t: { to: string }) => t.to)).toEqual(['待投递', '已投递', '笔试', '面试', 'Offer', '结束']);
+      expect(app.stage).toBe('结束');
+    });
+
+    await test.step('阶段与末步冲突：沿相邻路径补齐到记录的阶段', async () => {
+      const apps = await readStorage(page, STORAGE_KEYS.applications);
+      const app = apps.find((a: { id: string }) => a.id === 'conflict_1');
+      expect(app.timeline.map((t: { to: string }) => t.to)).toEqual(['待投递', '已投递', '笔试', '面试', 'Offer']);
+      expect(app.stage).toBe('Offer');
+    });
+
+    await test.step('非法阶段：以合法时间线末步为准', async () => {
+      const apps = await readStorage(page, STORAGE_KEYS.applications);
+      const app = apps.find((a: { id: string }) => a.id === 'badstage_1');
+      expect(app.stage).toBe('已投递');
+    });
+
+    await test.step('全局不变量与 UI 展示', async () => {
+      await expectLegalApplications(page);
+      await expect(page.getByRole('heading', { name: '求职进展工作台' }), '非法历史恢复后应用正常打开').toBeVisible();
+      await expect(page.locator('article')).toHaveCount(4);
+      // 展示的是补全后的合法路径，而不是原始的跳级记录
+      const skipCard = page.locator('article', { hasText: '跳级公司' });
+      await skipCard.getByRole('button', { name: /时间线/ }).click();
+      await expect(skipCard.getByText('笔试 → 面试', { exact: true })).toBeVisible();
+      await expect(skipCard.getByText('待投递 → 面试'), '不得原样展示跳级历史').toHaveCount(0);
+    });
+  });
+
+  test('恢复关联简历缺失的备份：申请保留并报失联，可重新关联', async ({ page }, testInfo) => {
+    const T1 = '2026-03-01T08:00:00.000Z';
+    const T2 = '2026-03-02T08:00:00.000Z';
+    const T3 = '2026-03-03T08:00:00.000Z';
+
+    await page.goto('/applications');
+    const backup = {
+      exportedAt: '2026-03-05T00:00:00.000Z',
+      resumes: [],
+      activeResumeId: null,
+      profile: {
+        fullName: '旧备份用户', headline: '', phone: '', email: '',
+        location: '', website: '', avatarUrl: '', targetRole: '', summary: '',
+      },
+      selectedTemplateId: 'atelier',
+      theme: 'light',
+      applications: [
+        {
+          id: 'ghost_1', company: '幽灵公司', position: '岗位', stage: '笔试', createdAt: T1, updatedAt: T3,
+          resumeId: 'ghost_resume', resumeTitle: '已消失的简历',
+          timeline: [
+            { from: null, to: '待投递', at: T1 },
+            { from: '待投递', to: '已投递', at: T2 },
+            { from: '已投递', to: '笔试', at: T3 },
+          ],
+        },
+      ],
+    };
+    const backupPath = testInfo.outputPath('ghost-resume-backup.json');
+    await writeFile(backupPath, JSON.stringify(backup, null, 2));
+
+    const navigated = page.waitForEvent('framenavigated');
+    await page.locator('input[type=file]').setInputFiles(backupPath);
+    await navigated;
+
+    await test.step('申请保留、阶段时间线不变、关联缺失可识别', async () => {
+      const apps = await readStorage(page, STORAGE_KEYS.applications);
+      expect(apps, '关联简历缺失时申请必须保留').toHaveLength(1);
+      expect(apps[0].stage).toBe('笔试');
+      expect(apps[0].timeline).toHaveLength(3);
+      expect(apps[0].resumeId).toBe('ghost_resume');
+      await expect(page.getByText(/已删除，申请已保留/)).toBeVisible();
+      await expectLegalApplications(page);
+    });
+
+    await test.step('重新关联后阶段时间线不变', async () => {
+      // 空简历列表恢复后，默认简历会重新生成，可直接关联
+      await page.locator('article').getByRole('combobox').selectOption({ label: DEFAULT_RESUME_TITLE });
+      await expect(page.getByText(/已关联简历/)).toBeVisible();
+      await expect(page.getByText(/已删除，申请已保留/)).toHaveCount(0);
+      const apps = await readStorage(page, STORAGE_KEYS.applications);
+      const resumes = await readStorage(page, STORAGE_KEYS.resumes);
+      expect(apps[0].resumeId).toBe(resumes[0].id);
+      expect(apps[0].stage, '重新关联不改变阶段').toBe('笔试');
+      expect(apps[0].timeline, '重新关联不改写时间线').toHaveLength(3);
+    });
   });
 });
