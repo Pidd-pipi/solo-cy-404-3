@@ -37,6 +37,13 @@ npm run build
 npm run preview
 ```
 
+端到端测试（真实浏览器 + 真实 localStorage，覆盖首次进入、刷新、重开、备份往返、旧备份恢复、失联与重新关联）：
+
+```bash
+npx playwright install chromium   # 首次运行前安装浏览器
+npm run test:e2e
+```
+
 ## 技术栈
 
 | 分类 | 技术 |

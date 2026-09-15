@@ -28,7 +28,7 @@ export function ResumeCard({ resume, onDuplicate, onDelete }: ResumeCardProps) {
             <h3 className="mt-2 font-display text-2xl font-semibold text-[var(--ink)]">{resume.title}</h3>
           </div>
           <Menu as="div" className="relative">
-            <MenuButton className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--surface-alt)]">
+            <MenuButton aria-label="简历操作" className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--surface-alt)]">
               <MoreVertical size={18} aria-hidden />
             </MenuButton>
             <MenuItems className="absolute right-0 z-20 mt-2 w-44 border border-[var(--border)] bg-[var(--surface)] p-1 shadow-panel">
