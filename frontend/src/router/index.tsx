@@ -5,6 +5,7 @@ import { Profile } from '../pages/Profile';
 import { ResumeEditor } from '../pages/ResumeEditor';
 import { ResumeList } from '../pages/ResumeList';
 import { TemplateGallery } from '../pages/TemplateGallery';
+import { Workbench } from '../pages/Workbench';
 
 export const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
       { path: 'resumes', element: <ResumeList /> },
       { path: 'resumes/:id/edit', element: <ResumeEditor /> },
       { path: 'resumes/:id/export', element: <ExportPreview /> },
+      { path: 'applications', element: <Workbench /> },
       { path: 'templates', element: <TemplateGallery /> },
       { path: 'profile', element: <Profile /> },
       { path: '*', element: <Navigate replace to="/resumes" /> },

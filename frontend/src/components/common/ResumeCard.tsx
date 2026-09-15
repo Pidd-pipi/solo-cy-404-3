@@ -1,6 +1,7 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import { Copy, Download, Edit3, MoreVertical, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useApplicationStore } from '../../stores/application';
 import { getTemplateById } from '../../stores/template';
 import { Resume } from '../../types/resume';
 import { formatDateTime } from '../../utils/format';
@@ -14,6 +15,9 @@ interface ResumeCardProps {
 export function ResumeCard({ resume, onDuplicate, onDelete }: ResumeCardProps) {
   const template = getTemplateById(resume.templateId);
   const enabledSections = resume.sections.filter((section) => section.enabled).length;
+  const linkedApplications = useApplicationStore(
+    (state) => state.applications.filter((application) => application.resumeId === resume.id).length,
+  );
 
   return (
     <article className="group flex min-h-[260px] flex-col justify-between border border-[var(--border)] bg-[var(--surface)] p-5 shadow-panel transition hover:-translate-y-0.5">
@@ -53,7 +57,10 @@ export function ResumeCard({ resume, onDuplicate, onDelete }: ResumeCardProps) {
       </div>
       <div className="mt-6">
         <div className="mb-4 grid grid-cols-2 gap-3 text-xs text-[var(--muted)]">
-          <span>{enabledSections} 个模块启用</span>
+          <span>
+            {enabledSections} 个模块启用
+            {linkedApplications > 0 ? ` · 关联 ${linkedApplications} 个申请` : ''}
+          </span>
           <span className="text-right">更新 {formatDateTime(resume.updatedAt)}</span>
         </div>
         <div className="flex gap-2">

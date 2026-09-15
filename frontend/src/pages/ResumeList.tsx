@@ -1,13 +1,12 @@
 import { ChangeEvent, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileJson, FilePlus2, Upload } from 'lucide-react';
-import { readWorkspaceSnapshot, writeWorkspaceSnapshot, WorkspaceSnapshot } from '../api/storage';
 import { Button } from '../components/common/Button';
 import { EmptyState } from '../components/common/EmptyState';
 import { ResumeCard } from '../components/common/ResumeCard';
-import { defaultProfile } from '../stores/profile';
+import { useWorkspaceBackup } from '../hooks/useWorkspaceBackup';
+import { useApplicationStore } from '../stores/application';
 import { useResumeStore } from '../stores/resume';
-import { downloadJson, readJsonFile } from '../utils/storage';
 
 export function ResumeList() {
   const navigate = useNavigate();
@@ -16,24 +15,34 @@ export function ResumeList() {
   const createResume = useResumeStore((state) => state.createResume);
   const duplicateResume = useResumeStore((state) => state.duplicateResume);
   const deleteResume = useResumeStore((state) => state.deleteResume);
+  const { exportWorkspace, importWorkspace } = useWorkspaceBackup();
 
   const handleCreate = () => {
     const id = createResume();
     navigate(`/resumes/${id}/edit`);
   };
 
-  const handleExportJson = () => {
-    downloadJson('smart-resume-workspace.json', readWorkspaceSnapshot(defaultProfile));
+  const handleDelete = (resumeId: string) => {
+    const linkedCount = useApplicationStore
+      .getState()
+      .applications.filter((application) => application.resumeId === resumeId).length;
+    if (linkedCount > 0) {
+      const confirmed = window.confirm(
+        `该简历关联了 ${linkedCount} 个岗位申请。删除简历后申请会保留，但会失去关联（可在求职进展中重新关联）。确定删除吗？`,
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    deleteResume(resumeId);
   };
 
   const handleImportJson = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) {
-      return;
+    event.target.value = '';
+    if (file) {
+      await importWorkspace(file);
     }
-    const snapshot = await readJsonFile<WorkspaceSnapshot>(file);
-    writeWorkspaceSnapshot(snapshot);
-    window.location.reload();
   };
 
   return (
@@ -45,7 +54,7 @@ export function ResumeList() {
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">管理多个岗位版本，复制后可保留结构并快速改写内容。</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button icon={<FileJson size={16} aria-hidden />} onClick={handleExportJson}>
+          <Button icon={<FileJson size={16} aria-hidden />} onClick={exportWorkspace}>
             导出 JSON
           </Button>
           <Button icon={<Upload size={16} aria-hidden />} onClick={() => inputRef.current?.click()}>
@@ -71,11 +80,10 @@ export function ResumeList() {
       ) : (
         <div className="mt-8 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {resumes.map((resume) => (
-            <ResumeCard key={resume.id} resume={resume} onDelete={deleteResume} onDuplicate={duplicateResume} />
+            <ResumeCard key={resume.id} resume={resume} onDelete={handleDelete} onDuplicate={duplicateResume} />
           ))}
         </div>
       )}
     </div>
   );
 }
-

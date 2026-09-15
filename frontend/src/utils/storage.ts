@@ -1,6 +1,7 @@
 export const storageKeys = {
   resumes: 'smart-resume:resumes',
   activeResumeId: 'smart-resume:activeResumeId',
+  applications: 'smart-resume:applications',
   profile: 'smart-resume:profile',
   template: 'smart-resume:selectedTemplateId',
   theme: 'smart-resume:theme',
